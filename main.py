@@ -1,37 +1,102 @@
-""" Imports """
+import pymongo
+from pymongo import MongoClient
 from selenium import webdriver
-import time
-from bs4 import BeautifulSoup
-
-# from schema import collection
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.wait import WebDriverWait
+from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-"""Driver Arguments """
-options = webdriver.ChromeOptions()
-options.add_argument("user-data-dir=C:\\Users\hp\\AppData\\Local\\Google\\Chrome\\User Data")
-"""To run in headless mode uncomment that argument"""
-# options.add_argument('--headless')
+client = MongoClient('mongodb://localhost:27017')
+db = client['scrapper']
+collection = db['commissioners']
 
-"""Variables"""
-pageNumber = 0
-paginationNumber = 0
-timeout = 25000
+BASE_URL = "https://commissioners.ec.europa.eu"
 
-"""Initializing Webdriver"""
-driver = webdriver.Chrome(executable_path='chromedriver.exe', options=options)
-while pageNumber <= paginationNumber:
-    try:
-        URL = 'https://gramfree.today/free'
-        """Opening URL"""
-        driver.get(URL)
-        """Getting page source"""
-        WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#roll-button")))
-        driver.find_element_by_css_selector('#roll-button').click()
 
-    except:
-        print('Something went wrong...')
-        driver.close()
-if driver:
-    driver.close()
+def init_driver():
+    options = webdriver.ChromeOptions()
+    options.add_argument('headless')
+    return webdriver.Chrome(options=options)
+
+
+# Set up the webdriver
+driver = init_driver()
+
+# Load the webpage
+driver.get(f'{BASE_URL}/index_en')
+
+# Wait for the page to load
+wait = WebDriverWait(driver, 10)
+wait.until(EC.visibility_of_element_located((By.CLASS_NAME, "ecl-u-mb-2xl")))
+
+# Find all the commissioner boxes
+mainDivs = driver.find_elements(By.CLASS_NAME, 'ecl-u-mb-2xl')
+commissioners = mainDivs[4].find_elements(By.CLASS_NAME, 'ecl-content-item')
+
+# Extract the commissioners' information
+commissionersList = [{
+    'image': commissioner.find_element(By.CLASS_NAME, 'ecl-content-item__image').get_attribute('src'),
+    'profileLink': commissioner.find_element(By.CLASS_NAME, 'ecl-link').get_attribute('href'),
+    'role': commissioner.find_element(By.CLASS_NAME, 'ecl-content-block__primary-meta-item').text,
+    'name': commissioner.find_element(By.CLASS_NAME, 'ecl-content-block__title').text,
+    'company': commissioner.find_element(By.CLASS_NAME, 'ecl-content-block__description').text,
+} for commissioner in commissioners]
+
+# Extract additional information for each commissioner
+for commissioner in commissionersList:
+    driver.get(commissioner['profileLink'])
+
+    wait = WebDriverWait(driver, 10)
+    wait.until(EC.visibility_of_element_located((By.CLASS_NAME, "ecl-list-illustration__description")))
+
+    addressDiv = driver.find_element(By.CLASS_NAME, 'ecl-list-illustration__description')
+    pTags = addressDiv.find_elements(By.TAG_NAME, 'p')
+    commissioner['address'] = pTags[1].text
+
+    myTeamDiv = driver.find_elements(By.CLASS_NAME, 'ecl-link--secondary')
+    commissioner['myTeamsLink'] = myTeamDiv[1].get_attribute('href')
+
+teamMembers = []
+memberObject = {}
+for commissioner in commissionersList:
+    driver.get(commissioner['myTeamsLink'])
+
+    wait = WebDriverWait(driver, 10)
+    wait.until(EC.visibility_of_element_located((By.CLASS_NAME, "ecl-featured-item__item")))
+
+    addressDiv = driver.find_elements(By.CLASS_NAME, 'ecl-featured-item__item')
+    if len(addressDiv) > 1:
+        pTags = addressDiv[1].find_elements(By.TAG_NAME, 'p')
+    else:
+        pTags = addressDiv[0].find_elements(By.TAG_NAME, 'p')
+    commissioner['address2'] = pTags[1].text
+
+    teamsDiv = driver.find_elements(By.CLASS_NAME, 'ecl-content-item-block__item')
+    for member in teamsDiv:
+        memberObject['title'] = member.find_element(By.CLASS_NAME, 'ecl-content-block__title').text
+        userDetails = member.find_elements(By.CLASS_NAME, 'ecl-description-list__definition')
+        if len(userDetails) > 0:
+            memberObject['email'] = userDetails[0].text
+        if len(userDetails) > 1:
+            memberObject['phone'] = userDetails[1].text
+        if len(userDetails) > 2:
+            memberObject['responsibilties'] = userDetails[2].text
+
+        memberObject['image'] = member.find_element(By.CLASS_NAME, 'ecl-content-item__image').get_attribute('src')
+
+        teamMembers.append(memberObject)
+        memberObject = {}
+
+    commissioner['team'] = teamMembers
+    teamMembers = []
+    memberObject = {}
+
+# Close the webdriver
+driver.quit()
+
+# Print the list of commissioners
+print(commissionersList)
+for commissioner in commissionersList:
+    query = {'name': commissioner['name']}
+    update = {'$set': commissioner}
+    collection.update_one(query, update, upsert=True)
+client.close()

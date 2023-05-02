@@ -1,4 +1,4 @@
-selenium~=3.141.0
-pymongo~=3.11.2
-bs4~=0.0.1
-beautifulsoup4~=4.9.3
+selenium
+pymongo
+bs4
+flask
