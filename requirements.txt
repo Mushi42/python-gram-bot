@@ -2,3 +2,4 @@ selenium
 pymongo
 bs4
 flask
+flask-cors

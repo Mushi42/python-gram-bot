@@ -1,7 +1,10 @@
 from flask import Flask, jsonify
+from flask_cors import CORS
+
 from pymongo import MongoClient
 
 app = Flask(__name__)
+CORS(app)
 
 # Set up MongoDB connection
 client = MongoClient('mongodb://localhost:27017/')
@@ -53,4 +56,4 @@ def get_organztions():
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True,host="0.0.0.0",port=4554)
